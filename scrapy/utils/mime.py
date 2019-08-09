@@ -13,7 +13,7 @@ from scrapy.utils.python import to_bytes, to_native_str
 class MimeTypes(object):
 
     _WHITESSPACE_BYTES = [0x09, 0x0A, 0x0C, 0x0D, 0x20]
-    _PATTERN_TYPES = [
+    _SCRIPTABLE_PATTERNS = [
         ([0x3C, 0x21, 0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45, 0x20, 0x48, 0x54, 0x4D, 0x4C, 0x20],
         [0xFF, 0xFF, 0xDF, 0xDF, 0xDF, 0xDF, 0xDF, 0xDF, 0xDF, 0xFF, 0xDF, 0xDF, 0xDF, 0xDF, 0xFF], _WHITESSPACE_BYTES, 'text/html' ),
         ([0x3C, 0x21, 0x44, 0x4F, 0x43, 0x54, 0x59, 0x50, 0x45, 0x20, 0x48, 0x54, 0x4D, 0x4C, 0x3E],
@@ -51,12 +51,14 @@ class MimeTypes(object):
         ([0x3C ,0x21 ,0x2D ,0x2D ,0x20], [0xFF,0xFF,0xFF,0xFF,0xFF], _WHITESSPACE_BYTES, 'text/html'),
         ([0x3C ,0x21 ,0x2D ,0x2D ,0x3E], [0xFF,0xFF,0xFF,0xFF,0xFF], _WHITESSPACE_BYTES, 'text/html'),
         ([0x3C ,0x3F ,0x78 ,0x6D ,0x6C], [0xFF,0xFF,0xFF,0xFF,0xFF], _WHITESSPACE_BYTES, 'text/xml'),
-        ([0x25 ,0x50 ,0x44 ,0x46 ,0x2D], [0xFF,0xFF,0xFF,0xFF,0xFF], [], 'application/pdf'),
+        ([0x25 ,0x50 ,0x44 ,0x46 ,0x2D], [0xFF,0xFF,0xFF,0xFF,0xFF], [], 'application/pdf')
+    ]
+    _NON_SCRIPTABLE_PATTERNS = [
         ([0x25 ,0x21 ,0x50 ,0x53, 0x2D, 0x41, 0x64, 0x6F, 0x62 ,0x65 ,0x2D], 
         [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], [], 'application/postscript'),
         ([0xFE ,0xFF ,0x00 ,0x00], [0xFF ,0xFF ,0x00 ,0x00], [], 'text/plain'),
         ([0xFF ,0xFE ,0x00 ,0x00], [0xFF ,0xFF ,0x00 ,0x00], [], 'text/plain'),	
-        ([0xEF ,0xBB ,0xBF ,0x00], [0xFF ,0xFF ,0xFF ,0x00], [], 'text/plain'),
+        ([0xEF ,0xBB ,0xBF ,0x00], [0xFF ,0xFF ,0xFF ,0x00], [], 'text/plain')
     ]
     _BINARY_DATA_TYPES = [
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0E, 0x0F,
@@ -95,7 +97,7 @@ class MimeTypes(object):
         self.no_sniff_flag = no_sniff_flag
         # 1
         protocol = response.url.split(':')[0]
-        supplied_mime = self.get_supplied_mime(protocol,response.headers)
+        supplied_mime = self.get_supplied_mime(protocol, response.headers)
         if supplied_mime is None or supplied_mime.split(';')[0] in ['unkonown/unknown', 'application/unknown', '*/*']:
             self._sniff_scriptable_flag = not self.no_sniff_flag
             return self._compute_mime_type(response.body, getattr(response, 'encoding', None))
@@ -111,8 +113,7 @@ class MimeTypes(object):
         #5
         if supplied_mime.split(';')[0] == "text/html":
             return self._feed_or_html(response, supplied_mime)
-        return supplied_mime
-        
+        return supplied_mime     
 
     def _is_xml_mime_type(self, type):
         return True if self._is_mime_type(type) and\
@@ -203,8 +204,8 @@ class MimeTypes(object):
         """
         header_bytes = self._get_resource_header(resource)
         length = len(header_bytes)
-        if (length >= 2 and header_bytes in [[0xFE,0xFF], [0xFF,0xFE]] or
-            length >= 3 and header_bytes in [[0xEF,0xBB, 0xBF], [0xFF,0xFE]] or
+        if (length >= 2 and header_bytes in [bytearray([0xFE,0xFF]), bytearray([0xFF,0xFE])] or
+            length >= 3 and header_bytes in [bytearray([0xEF,0xBB, 0xBF]), bytearray([0xFF,0xFE])] or
             len([x for x in header_bytes if x in _BINARY_DATA_TYPES]) == 0):
             # Conditions written in same sequence as mentioned in the standard
             return 'text/plain'
@@ -236,17 +237,24 @@ class MimeTypes(object):
         Valid strings are as mentioned in 'https://tools.ietf.org/html/rfc7231#section-3.1.1.1'
         """
         type = to_native_str(type)
-        return True if re.match("^({0}/{1}+)(;\s?({0}+=(\"{2}+\"|{2}+)))?$".format("[a-zA-Z-*\._]", "[a-zA-Z-*\._+]", "[a-zA-Z-*\._0-9]"),type) else False
+        return True if re.match("^({0}/{1}+)(;\s?({0}+=(\"{2}+\"|{2}+)))?$".format("[a-zA-Z-*\._]", "[a-zA-Z-*\._+]", "[a-zA-Z-*\._0-9]"),type)\
+            else False
 
     def _compute_mime_type(self, resource, encoding=None):
         """ Tries to match the given resource with pre-defined byte patterns
         If matches any, returns the corresponding MIME type
         """
         header_bytes = self._get_resource_header(resource, encoding)
-        for pattern in self._PATTERN_TYPES:
+        if self._sniff_scriptable_flag:
+            for pattern in self._SCRIPTABLE_PATTERNS:
+                if self._match_pattern(header_bytes, pattern[0], pattern[1], pattern[2]):
+                    return pattern[3]
+        for pattern in self._NON_SCRIPTABLE_PATTERNS:
             if self._match_pattern(header_bytes, pattern[0], pattern[1], pattern[2]):
                 return pattern[3]
-        return None
+        if len([x for x in header_bytes if x in _BINARY_DATA_TYPES]) == 0:
+            return "text/plain"
+        return "application/octet-stream"
 
     def _get_resource_header(self, resource, encoding=None):
         """ Reading resource header as stated in 'https://mimesniff.spec.whatwg.org/#read-the-resource-header'.
