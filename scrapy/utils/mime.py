@@ -71,6 +71,22 @@ class MimeTypes(object):
         ([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], [], 'image/png'),
         ([0xFF, 0xD8, 0xFF], [0xFF, 0xFF, 0xFF], [], 'image/jpeg')
     ]
+    _AUDIO_VIDEO_PATTERNS = [
+        ([0x2E, 0x73, 0x6E, 0x64], [0xFF, 0xFF, 0xFF, 0xFF], [], 'audio/basic'),
+        ([0x46, 0x4F, 0x52, 0x4D, 0x00, 0x00, 0x00, 0x00, 0x41, 0x49, 0x46, 0x46],
+            [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF], [], 'audio/aiff'),
+        ([0x49, 0x44, 0x33], [0xFF, 0xFF, 0xFF], [], 'audio/mpeg'),
+        ([0x4F, 0x67, 0x67, 0x53, 0x00], [0xFF, 0xFF, 0xFF, 0xFF, 0xFF], [], 'application/ogg'),
+        ([0x4D, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06], [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], [], 'audio/midi'),
+        ([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x41, 0x56, 0x49, 0x20],
+            [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF], [], 'video/avi'),
+        ([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45], [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF], [], 'audio/wave')
+    ]
+    _ARCHIVE_PATTERNS = [
+        ([0x1F, 0x8B, 0x08], [0xFF, 0xFF, 0xFF], [], 'application/x-gzip'),
+        ([0x50, 0x4B, 0x03, 0x04], [0xFF, 0xFF, 0xFF, 0xFF], [], 'application/zip'),
+        ([0x52, 0x61, 0x72, 0x20, 0x1A, 0x07, 0x00], [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], [], 'application/x-rar-compressed')
+    ]
     _BINARY_DATA_TYPES = [
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0E, 0x0F,
         0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1C,
@@ -106,13 +122,14 @@ class MimeTypes(object):
         """ Returns the MIME type for a response
         """
         self.no_sniff_flag = no_sniff_flag
-        # 1
         protocol = response.url.split(':')[0]
         supplied_mime = self.get_supplied_mime(protocol, response.headers)
+        print(supplied_mime)
+        #1
         if supplied_mime is None or supplied_mime.split(';')[0] in ['unkonown/unknown', 'application/unknown', '*/*']:
             self._sniff_scriptable_flag = not self.no_sniff_flag
             return self._compute_mime_type(response.body, getattr(response, 'encoding', None))
-        # 2
+        #2
         if self.no_sniff_flag:
             return supplied_mime
         #3
@@ -145,7 +162,7 @@ class MimeTypes(object):
                     if sequence[s] == to_bytes('<'): # 0x3C
                         s+=1
                         break
-                    if sequence[s] not in _WHITESSPACE_BYTES:
+                    if sequence[s] not in self_WHITESSPACE_BYTES:
                         return supplied_mime
                     s += 1
                     
@@ -216,12 +233,14 @@ class MimeTypes(object):
         length = len(header_bytes)
         if (length >= 2 and header_bytes in [bytearray([0xFE,0xFF]), bytearray([0xFF,0xFE])] or
             length >= 3 and header_bytes in [bytearray([0xEF,0xBB, 0xBF]), bytearray([0xFF,0xFE])] or
-            len([x for x in header_bytes if x in _BINARY_DATA_TYPES]) == 0):
+            len([x for x in header_bytes if x in self._BINARY_DATA_TYPES]) == 0):
             # Conditions written in same sequence as mentioned in the standard
             return 'text/plain'
         return 'application/octet-stream'
     
     def get_supplied_mime(self, protocol, headers=None):
+        """ Extracts the MIME type supplied with the resource from its provider (eg. server)
+        """
         supplied_type = None
         if protocol.upper() in ['HTTP', 'HTTPS'] and headers is not None:
             supplied_type = headers.get('Content-Type')
@@ -237,13 +256,15 @@ class MimeTypes(object):
         might be mistakenly set as a result of Apache's bug
         """
         self._check_for_apache_bug_flag = False
-        if type in _TYPES_TO_CHECK_APACHE_BUG:
+        if type in self._TYPES_TO_CHECK_APACHE_BUG:
             self._check_for_apache_bug_flag = True
 
     def _is_mime_type(self, type):
         """ Checks that a given string is a valid MIME type string.
         Valid strings are as mentioned in 'https://tools.ietf.org/html/rfc7231#section-3.1.1.1'
         """
+        if not type:
+            return False
         type = to_native_str(type)
         return True if re.match("^({0}/{1}+)(;\s?({0}+=(\"{2}+\"|{2}+)))?$".format("[a-zA-Z-*\._]", "[a-zA-Z-*\._+]", "[a-zA-Z-*\._0-9]"),type)\
             else False
@@ -254,14 +275,15 @@ class MimeTypes(object):
         """
         header_bytes = self._get_resource_header(resource, encoding)
         if self._sniff_scriptable_flag:
-            mime_type = self._match_group_pattern(header_bytes, self._SCRIPTABLE_PATTERNS)
-            if mime_type:
-                return mime_type
-        mime_type = self._match_group_pattern(header_bytes, self._NON_SCRIPTABLE_PATTERNS)\
-            or self._match_group_pattern(header_bytes, self._IMAGE_PATTERNS)
+            mime_type_tmp = self._match_group_pattern(header_bytes, self._SCRIPTABLE_PATTERNS)
+        mime_type = mime_type_tmp\
+                or self._match_group_pattern(header_bytes, self._NON_SCRIPTABLE_PATTERNS)\
+                or self._match_group_pattern(header_bytes, self._IMAGE_PATTERNS)\
+                or self._match_audio_video_pattern(header_bytes)\
+                or self._match_group_pattern(header_bytes, self._ARCHIVE_PATTERNS)
         if mime_type:
             return mime_type
-        if len([x for x in header_bytes if x in _BINARY_DATA_TYPES]) == 0:
+        if len([x for x in header_bytes if x in self._BINARY_DATA_TYPES]) == 0:
             return "text/plain"
         return "application/octet-stream"
 
@@ -274,6 +296,7 @@ class MimeTypes(object):
 
     def _match_pattern(self, byte_sequence, byte_pattern, pattern_mask, bytes_to_ignore):
         """ Determines if a given bytes sequence matches a specific bytes pattern
+        If so, return the MIME type for that pattern
         """
         assert len(byte_pattern) == len(pattern_mask) , "Pattern's length is not equal to mask's length"
         if len(byte_sequence) < len(byte_pattern):
@@ -294,11 +317,24 @@ class MimeTypes(object):
         return True
 
     def _match_group_pattern(self, byte_sequence, group):
+        """ Determine if a given byte sequence matches any pattern from a specific group
+        If so, return the MIME type for that pattern
+        """
         for pattern in group:
             if self._match_pattern(byte_sequence, pattern[0], pattern[1], pattern[2]):
                 return pattern[3]
         return None
 
+    def match_audio_video_pattern(self, byte_sequence):
+        """ Determine if a given byte sequence matches any pattern from a audio video group
+        If so, return the MIME type for that pattern
+
+        This is separated as it has additional steps
+        """
+        for pattern in self._AUDIO_VIDEO_PATTERNS:
+            if self._match_pattern(byte_sequence, pattern[0], pattern[1], pattern[2]):
+                return pattern[3]
+         
     def get_extension(self, type):
         """ Returns the file extension for the MIME type passed.
         If type is unknown, returns default '.txt' extension
