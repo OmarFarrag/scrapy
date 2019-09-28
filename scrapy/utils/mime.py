@@ -124,9 +124,8 @@ class MimeTypes(object):
         self.no_sniff_flag = no_sniff_flag
         protocol = response.url.split(':')[0]
         supplied_mime = self.get_supplied_mime(protocol, response.headers)
-        print(supplied_mime)
         #1
-        if supplied_mime is None or supplied_mime.split(';')[0] in ['unkonown/unknown', 'application/unknown', '*/*']:
+        if supplied_mime is None or self.get_mime_essence(supplied_mime) in ['unkonown/unknown', 'application/unknown', '*/*']:
             self._sniff_scriptable_flag = not self.no_sniff_flag
             return self._compute_mime_type(response.body, getattr(response, 'encoding', None))
         #2
@@ -139,7 +138,7 @@ class MimeTypes(object):
         if self._is_xml_mime_type(supplied_mime):
             return supplied_mime
         #5
-        if supplied_mime.split(';')[0] == "text/html":
+        if self.get_mime_essence(supplied_mime) == "text/html":
             return self._feed_or_html(response, supplied_mime)
         return supplied_mime     
 
@@ -147,7 +146,7 @@ class MimeTypes(object):
         return True if self._is_mime_type(type) and\
             re.match(".*\+xml|text/xml|application/xml", type) else False
     
-    def _feed_or_html(self, resource ,supplied_mime):
+    def _feed_or_html(self, resource, supplied_mime):
         """Determine whether a feed has been mislabeled as HTML, and
         returns the appropriate MIME type
         """
@@ -231,10 +230,9 @@ class MimeTypes(object):
         """
         header_bytes = self._get_resource_header(resource)
         length = len(header_bytes)
-        if (length >= 2 and header_bytes in [bytearray([0xFE,0xFF]), bytearray([0xFF,0xFE])] or
-            length >= 3 and header_bytes in [bytearray([0xEF,0xBB, 0xBF]), bytearray([0xFF,0xFE])] or
-            len([x for x in header_bytes if x in self._BINARY_DATA_TYPES]) == 0):
-            # Conditions written in same sequence as mentioned in the standard
+        if ((length >= 2 and header_bytes in [bytearray([0xFE,0xFF]), bytearray([0xFF,0xFE])]) or
+            (length >= 3 and header_bytes in [bytearray([0xEF,0xBB, 0xBF]), bytearray([0xFF,0xFE])]) or
+            not self._has_binary_byte(header_bytes)):
             return 'text/plain'
         return 'application/octet-stream'
     
@@ -272,6 +270,8 @@ class MimeTypes(object):
     def _compute_mime_type(self, resource, encoding=None):
         """ Tries to match the given resource with pre-defined byte patterns
         If matches any, returns the corresponding MIME type
+        If doesn't match any, and has no binary data types, return 'text/plain'
+        Returns 'application/octet-stream' otherwise
         """
         header_bytes = self._get_resource_header(resource, encoding)
         if self._sniff_scriptable_flag:
@@ -283,7 +283,7 @@ class MimeTypes(object):
                 or self._match_group_pattern(header_bytes, self._ARCHIVE_PATTERNS)
         if mime_type:
             return mime_type
-        if len([x for x in header_bytes if x in self._BINARY_DATA_TYPES]) == 0:
+        if not self._has_binary_byte(header_bytes):
             return "text/plain"
         return "application/octet-stream"
 
@@ -325,7 +325,7 @@ class MimeTypes(object):
                 return pattern[3]
         return None
 
-    def match_audio_video_pattern(self, byte_sequence):
+    def _match_audio_video_pattern(self, byte_sequence):
         """ Determine if a given byte sequence matches any pattern from a audio video group
         If so, return the MIME type for that pattern
 
@@ -334,6 +334,7 @@ class MimeTypes(object):
         for pattern in self._AUDIO_VIDEO_PATTERNS:
             if self._match_pattern(byte_sequence, pattern[0], pattern[1], pattern[2]):
                 return pattern[3]
+        #TODO: Add matching MP4, WebM, MP3
          
     def get_extension(self, type):
         """ Returns the file extension for the MIME type passed.
@@ -346,4 +347,17 @@ class MimeTypes(object):
             raise TypeError("Unsupported MIME type: %s" %
                         type)
 
+    def get_mime_essence(self, mime):
+        """ MIME type essence is the type followed by '/'
+        followerd by subtype
+        """
+        return mime.split(';')[0]
 
+    def _has_binary_byte(self, bytes_seq):
+        """ Checks if a byte sequence contains any binary data type.
+        Binary data types mentioned in 'https://mimesniff.spec.whatwg.org/#binary-data-byte'
+        """
+        for byte in bytes_seq:
+            if byte in self._BINARY_DATA_TYPES:
+                return True
+        return False
