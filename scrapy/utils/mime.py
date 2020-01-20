@@ -161,7 +161,7 @@ class MimeTypes(object):
                     if sequence[s] == to_bytes('<'): # 0x3C
                         s+=1
                         break
-                    if sequence[s] not in self_WHITESSPACE_BYTES:
+                    if sequence[s] not in self._WHITESSPACE_BYTES:
                         return supplied_mime
                     s += 1
                     
